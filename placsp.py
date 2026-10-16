@@ -118,8 +118,19 @@ def _abrir(url: str, intentos: int = 4):
 
 def descargar_fichero(url: str, destino: Path) -> bool:
     try:
+        t0, n, aviso = time.time(), 0, 50e6
         with _abrir(url) as r, open(destino, "wb") as f:
-            shutil.copyfileobj(r, f, length=1 << 20)
+            total = r.headers.get("Content-Length")
+            while True:
+                b = r.read(1 << 20)
+                if not b:
+                    break
+                f.write(b)
+                n += len(b)
+                if n >= aviso:
+                    v = n / 1e6 / max(time.time() - t0, 1e-3)
+                    log(f"    {n / 1e6:.0f} MB" + (f" de {int(total) / 1e6:.0f}" if total else "") + f" · {v:.1f} MB/s")
+                    aviso += 50e6
         log(f"  descargado {url.rsplit('/', 1)[-1]} ({destino.stat().st_size / 1e6:.1f} MB)")
         return True
     except urllib.error.HTTPError as e:
