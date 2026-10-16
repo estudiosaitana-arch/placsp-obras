@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       periodos:
-        description: 'Periodos: "auto" (mes anterior + mes en curso), un año "2025", meses "202601-202609" o lista "2024,2025"'
+        description: 'Periodos: "auto" (mes anterior + mes en curso), un año "2025", meses "202601-202609", lista "2024,2025" o "ninguno"'
         required: true
         default: "auto"
       fuentes:
@@ -16,15 +16,24 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 concurrency:
   group: actualizar-datos
   cancel-in-progress: false
 
+env:
+  RELEASE: datos
+  GH_TOKEN: ${{ github.token }}
+
 jobs:
   actualizar:
     runs-on: ubuntu-latest
     timeout-minutes: 350
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
     steps:
       - uses: actions/checkout@v4
 
@@ -32,21 +41,60 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: Recuperar datos brutos de la release
+        run: |
+          mkdir -p data/raw
+          gh release view "$RELEASE" >/dev/null 2>&1 || \
+            gh release create "$RELEASE" --title "Datos brutos PLACSP (obras)" \
+              --notes "Ficheros intermedios por fuente y mes (data/raw) y tablas para Excel. Los actualiza el workflow Actualizar datos PLACSP."
+          gh release download "$RELEASE" -p "*.jsonl.gz" -D data/raw --clobber || true
+          ls data/raw | wc -l
+          touch "$RUNNER_TEMP/marca"
+
       - name: Descargar y parsear
         timeout-minutes: 300
         continue-on-error: true
         run: python placsp.py descargar --periodos "${{ github.event.inputs.periodos || 'auto' }}" --fuentes "${{ github.event.inputs.fuentes || 'placsp,agregadas' }}"
 
+      - name: Subir datos brutos nuevos a la release
+        if: always()
+        run: |
+          gh release view "$RELEASE" --json assets -q '.assets[].name' > "$RUNNER_TEMP/existentes.txt"
+          for f in data/raw/*.jsonl.gz; do
+            [ -e "$f" ] || continue
+            n=$(basename "$f")
+            if ! grep -qx "$n" "$RUNNER_TEMP/existentes.txt" || [ "$f" -nt "$RUNNER_TEMP/marca" ]; then
+              echo "subiendo $n"; gh release upload "$RELEASE" "$f" --clobber
+            fi
+          done
+
       - name: Construir fichas
         if: always()
         run: python placsp.py construir
 
-      - name: Guardar cambios
+      - name: Publicar tablas para Excel en la release
         if: always()
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A data docs/data
-          if git diff --cached --quiet; then echo "Sin cambios"; exit 0; fi
-          git commit -m "Datos PLACSP: ${{ github.event.inputs.periodos || 'auto' }} ($(date -u +%Y-%m-%d))"
-          for i in 1 2 3; do git pull --rebase -X theirs && git push && break; sleep 10; done
+          for f in data/expedientes_obra.csv.gz data/adjudicaciones_obra.csv.gz data/organos_obra.csv; do
+            [ -e "$f" ] && gh release upload "$RELEASE" "$f" --clobber
+          done
+
+      - uses: actions/upload-pages-artifact@v3
+        if: always()
+        with:
+          path: docs
+
+      - id: deploy
+        if: always()
+        uses: actions/deploy-pages@v4
+
+      - name: Retirar del repositorio los datos versionados (solo la primera vez)
+        if: always()
+        run: |
+          if [ -n "$(git ls-files data docs/data)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git rm -r -q --cached data docs/data
+            git commit -m "Datos fuera del repositorio: release '$RELEASE' + GitHub Pages por Actions"
+            for i in 1 2 3; do git pull --rebase && git push && break; sleep 10; done
+          fi
