@@ -4,9 +4,9 @@ placsp-obras · Fichas de órganos de contratación (licitaciones de OBRA)
 a partir de los datos abiertos de la Plataforma de Contratación del Sector Público.
 
 Uso:
-  python placsp.py descargar --periodos auto            # mes anterior (zip) + mes en curso (atom)
-  python placsp.py descargar --periodos 2025            # año completo (zip anual)
-  python placsp.py descargar --periodos 202601-202609   # rango de meses (zips mensuales)
+  python placsp.py descargar --periodos auto            # mes anterior + mes en curso
+  python placsp.py descargar --periodos 2025            # los 12 zips mensuales de 2025
+  python placsp.py descargar --periodos 202601-202609   # rango de meses
   python placsp.py construir                            # consolida y genera docs/data/*
 
 Solo usa la biblioteca estándar de Python (3.10+).
@@ -44,12 +44,10 @@ FUENTES = {
     # Licitaciones publicadas en la PLACSP (perfiles de contratante), sin menores
     "placsp": {
         "zip": BASE + "/sindicacion_643/licitacionesPerfilesContratanteCompleto3_{p}.zip",
-        "atom": BASE + "/sindicacion_643/licitacionesPerfilesContratanteCompleto3.atom",
     },
     # Plataformas autonómicas agregadas (Madrid, Cataluña, Euskadi, Andalucía, Galicia...), sin menores
     "agregadas": {
         "zip": BASE + "/sindicacion_1044/PlataformasAgregadasSinMenores_{p}.zip",
-        "atom": BASE + "/sindicacion_1044/PlataformasAgregadasSinMenores.atom",
     },
 }
 UA = "placsp-obras/1.0 (+https://github.com/estudiosaitana-arch/placsp-obras)"
@@ -119,8 +117,13 @@ def _abrir(url: str, intentos: int = 4):
 def descargar_fichero(url: str, destino: Path) -> bool:
     try:
         t0, n, aviso = time.time(), 0, 50e6
+        nombre = url.rsplit("/", 1)[-1]
         with _abrir(url) as r, open(destino, "wb") as f:
             total = r.headers.get("Content-Length")
+            ctype = r.headers.get("Content-Type", "")
+            if url.endswith(".zip") and "html" in ctype:
+                log(f"  no disponible (la plataforma devuelve una página HTML): {nombre}")
+                return False
             while True:
                 b = r.read(1 << 20)
                 if not b:
@@ -129,9 +132,9 @@ def descargar_fichero(url: str, destino: Path) -> bool:
                 n += len(b)
                 if n >= aviso:
                     v = n / 1e6 / max(time.time() - t0, 1e-3)
-                    log(f"    {n / 1e6:.0f} MB" + (f" de {int(total) / 1e6:.0f}" if total else "") + f" · {v:.1f} MB/s")
+                    log(f"    {nombre}: {n / 1e6:.0f} MB" + (f" de {int(total) / 1e6:.0f}" if total else "") + f" · {v:.2f} MB/s")
                     aviso += 50e6
-        log(f"  descargado {url.rsplit('/', 1)[-1]} ({destino.stat().st_size / 1e6:.1f} MB)")
+        log(f"  descargado {nombre} ({n / 1e6:.1f} MB en {(time.time() - t0) / 60:.1f} min)")
         return True
     except urllib.error.HTTPError as e:
         log(f"  no disponible ({e.code}): {url}")
@@ -372,15 +375,6 @@ def parsear_atom(fich, fuente: str, salida: list, borrados: list):
     return feed_updated
 
 
-def _siguiente(fich) -> str | None:
-    """Busca el enlace rel=next en la cabecera del atom (primeros KB)."""
-    with open(fich, "rb") as f:
-        cab = f.read(6000).decode("utf-8", "ignore")
-    m = re.search(r'<link[^>]*href="([^"]+)"[^>]*rel="next"', cab) or \
-        re.search(r'<link[^>]*rel="next"[^>]*href="([^"]+)"', cab)
-    return m.group(1) if m else None
-
-
 def guardar_raw(fuente: str, periodo: str, regs: list, borrados: list):
     RAW.mkdir(parents=True, exist_ok=True)
     ruta = RAW / f"{fuente}_{periodo}.jsonl.gz"
@@ -394,6 +388,7 @@ def guardar_raw(fuente: str, periodo: str, regs: list, borrados: list):
 
 def procesar_zip(fuente: str, periodo: str) -> bool:
     url = FUENTES[fuente]["zip"].format(p=periodo)
+    log(f"[{fuente}] {periodo}: descargando")
     with tempfile.TemporaryDirectory() as tmp:
         z = Path(tmp) / "f.zip"
         if not descargar_fichero(url, z):
@@ -401,79 +396,69 @@ def procesar_zip(fuente: str, periodo: str) -> bool:
         regs, borr = [], []
         with zipfile.ZipFile(z) as zf:
             nombres = [n for n in zf.namelist() if n.endswith(".atom")]
-            log(f"  {len(nombres)} ficheros atom en el zip")
+            log(f"[{fuente}] {periodo}: {len(nombres)} ficheros atom en el zip")
             for i, n in enumerate(nombres, 1):
                 with zf.open(n) as fh:
                     parsear_atom(fh, fuente, regs, borr)
                 if i % 200 == 0:
-                    log(f"  ... {i}/{len(nombres)} ({len(regs)} obras)")
+                    log(f"[{fuente}] {periodo}: {i}/{len(nombres)} ({len(regs)} obras)")
         guardar_raw(fuente, periodo, regs, borr)
     return True
 
 
-def procesar_atom_mes_actual(fuente: str, hoy: dt.date):
-    """Recorre la cadena atom desde el fichero vivo hasta el inicio del mes en curso."""
-    inicio = hoy.replace(day=1).isoformat()
-    url = FUENTES[fuente]["atom"]
-    regs, borr, n = [], [], 0
-    vistos = set()
-    with tempfile.TemporaryDirectory() as tmp:
-        while url and url not in vistos and n < 3000:
-            vistos.add(url)
-            f = Path(tmp) / "x.atom"
-            if not descargar_fichero(url, f):
-                break
-            n += 1
-            antes = len(regs)
-            upd = parsear_atom(str(f), fuente, regs, borr)
-            # Descarta lo anterior al mes (ya cubierto por el zip mensual)
-            regs[antes:] = [r for r in regs[antes:] if r["updated"][:10] >= inicio]
-            if upd and upd[:10] < inicio:
-                break
-            url = _siguiente(f)
-    guardar_raw(fuente, hoy.strftime("%Y%m") + "_parcial", regs, borr)
-
-
 def periodos_desde(txt: str, hoy: dt.date):
-    """'auto' | '2025' | '202601-202609' | lista separada por comas."""
+    """'auto' | '2025' | '202601-202609' | lista separada por comas. Devuelve meses AAAAMM."""
+    actual = hoy.strftime("%Y%m")
     out = []
     for parte in [p.strip() for p in txt.split(",") if p.strip()]:
         if parte == "auto":
             prev = (hoy.replace(day=1) - dt.timedelta(days=1))
-            out.append(prev.strftime("%Y%m"))
-            out.append("ACTUAL")
+            out += [prev.strftime("%Y%m"), actual]
+            continue
+        if re.fullmatch(r"\d{4}", parte):
+            a, b = parte + "01", parte + "12"
         elif re.fullmatch(r"\d{6}-\d{6}", parte):
             a, b = parte.split("-")
-            y, m = int(a[:4]), int(a[4:])
-            while f"{y:04d}{m:02d}" <= b:
-                out.append(f"{y:04d}{m:02d}")
-                m += 1
-                if m == 13:
-                    y, m = y + 1, 1
-        elif re.fullmatch(r"\d{4}|\d{6}", parte):
-            out.append(parte)
+        elif re.fullmatch(r"\d{6}", parte):
+            a = b = parte
         else:
             sys.exit(f"Periodo no reconocido: {parte}")
-    return out
+        y, m = int(a[:4]), int(a[4:])
+        while f"{y:04d}{m:02d}" <= min(b, actual):
+            out.append(f"{y:04d}{m:02d}")
+            m += 1
+            if m == 13:
+                y, m = y + 1, 1
+    return list(dict.fromkeys(out))
 
 
 def cmd_descargar(args):
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     hoy = dt.date.today()
+    recientes = set(periodos_desde("auto", hoy))
     fuentes = [f.strip() for f in args.fuentes.split(",")]
+    tareas = []
     for p in periodos_desde(args.periodos, hoy):
         for fu in fuentes:
-            log(f"[{fu}] periodo {p}")
-            if p == "ACTUAL":
-                procesar_atom_mes_actual(fu, hoy)
+            ya = (RAW / f"{fu}_{p}.jsonl.gz").exists()
+            if ya and p not in recientes and not args.forzar:
+                log(f"[{fu}] {p}: ya descargado, se omite (use --forzar para repetir)")
                 continue
-            ok = procesar_zip(fu, p)
-            if ok and len(p) == 6:
-                # El parcial del mes queda superado por el zip mensual
-                parcial = RAW / f"{fu}_{p}_parcial.jsonl.gz"
-                if parcial.exists():
-                    parcial.unlink()
-            if not ok and len(p) == 6:
-                log("  (si el mes pertenece a un año cerrado, use el año completo: --periodos AAAA)")
+            tareas.append((fu, p))
+    log(f"{len(tareas)} ficheros a descargar con {args.hilos} descargas en paralelo")
+    fallos = []
+    with ThreadPoolExecutor(max_workers=args.hilos) as ex:
+        futs = {ex.submit(procesar_zip, fu, p): (fu, p) for fu, p in tareas}
+        for f in as_completed(futs):
+            fu, p = futs[f]
+            try:
+                if not f.result():
+                    fallos.append(f"{fu}_{p}")
+            except Exception as e:  # noqa: BLE001
+                log(f"[{fu}] {p}: ERROR {e}")
+                fallos.append(f"{fu}_{p}")
+    if fallos:
+        log("No descargados:", ", ".join(sorted(fallos)))
 
 
 # ---------------------------------------------------------------- construir
@@ -693,6 +678,8 @@ def main():
     d = sub.add_parser("descargar")
     d.add_argument("--periodos", default="auto")
     d.add_argument("--fuentes", default="placsp,agregadas")
+    d.add_argument("--hilos", type=int, default=6, help="Descargas simultáneas")
+    d.add_argument("--forzar", action="store_true", help="Repetir periodos ya descargados")
     d.set_defaults(func=cmd_descargar)
     c = sub.add_parser("construir")
     c.add_argument("--desde", default="", help="Año mínimo (AAAA) a incluir en las fichas")

@@ -21,15 +21,17 @@ Expedientes e importe licitado (total y por año), PBL mediano, baja media / med
 
 ## Uso
 
-Automático: el workflow **Actualizar datos PLACSP** se ejecuta cada lunes (mes anterior completo + mes en curso).
+Automático: el workflow **Actualizar datos PLACSP** se ejecuta cada lunes (vuelve a descargar el mes anterior y el mes en curso).
 
 Carga histórica (una ejecución por año, desde *Actions → Actualizar datos PLACSP → Run workflow*):
 
 | periodos | qué descarga |
 |---|---|
-| `auto` | mes anterior (zip mensual) + mes en curso (atom) |
-| `2025` | año completo (zip anual) |
-| `202601-202609` | meses sueltos del año en curso |
+| `auto` | mes anterior + mes en curso |
+| `2025` | los 12 ficheros mensuales de 2025 |
+| `202401-202406` | rango de meses |
+
+Los meses ya descargados se omiten, así que si una carga se corta por tiempo basta con relanzarla con el mismo periodo. La PLACSP sirve los ficheros a unos 0,2 MB/s por conexión; el script descarga 6 meses en paralelo.
 
 En local (Python 3.10+, sin dependencias):
 
