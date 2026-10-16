@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Órganos de contratación · Obras</title>
+<style>
+:root{--bg:#f7f7f5;--panel:#fff;--tx:#1d1d1b;--mu:#6b6b66;--ln:#e3e2dd;--ac:#b4471f;--ac2:#f3e3db;--ok:#2f6f4f;--bar:#c9673f}
+@media (prefers-color-scheme:dark){:root{--bg:#161615;--panel:#1f1f1d;--tx:#ecebe6;--mu:#9b9a93;--ln:#33322f;--ac:#e07a4f;--ac2:#3a2a22;--ok:#6fbf94;--bar:#e07a4f}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{padding:18px 16px 10px;border-bottom:1px solid var(--ln);background:var(--panel)}
+header h1{margin:0;font-size:18px;font-weight:650}
+header p{margin:4px 0 0;color:var(--mu);font-size:12.5px}
+main{max-width:1200px;margin:0 auto;padding:16px}
+.fil{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px}
+input,select{font:inherit;padding:7px 9px;border:1px solid var(--ln);border-radius:6px;background:var(--panel);color:var(--tx)}
+input[type=search]{flex:1 1 280px}
+table{width:100%;border-collapse:collapse;background:var(--panel);border:1px solid var(--ln);border-radius:8px;overflow:hidden}
+th,td{padding:7px 9px;border-bottom:1px solid var(--ln);text-align:left;vertical-align:top}
+th{font-size:12px;color:var(--mu);font-weight:600;cursor:pointer;user-select:none;white-space:nowrap;background:var(--panel)}
+td.n,th.n{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+tbody tr:hover{background:var(--ac2)}
+tr.cl{cursor:pointer}
+.mu{color:var(--mu)}.sm{font-size:12px}
+.wrap{overflow-x:auto}
+a{color:var(--ac)}
+.kp{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:10px;margin:14px 0}
+.k{background:var(--panel);border:1px solid var(--ln);border-radius:8px;padding:10px 12px}
+.k b{display:block;font-size:20px;font-weight:650;font-variant-numeric:tabular-nums}
+.k span{font-size:12px;color:var(--mu)}
+.g2{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin:14px 0}
+.card{background:var(--panel);border:1px solid var(--ln);border-radius:8px;padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:13.5px}
+.hb{display:grid;grid-template-columns:150px 1fr 70px;gap:6px;align-items:center;font-size:12.5px;margin:3px 0}
+.hb i{display:block;height:10px;background:var(--bar);border-radius:2px}
+.back{display:inline-block;margin-bottom:8px;cursor:pointer;color:var(--ac)}
+h2{margin:4px 0 2px;font-size:19px}
+.pill{display:inline-block;padding:1px 7px;border-radius:10px;background:var(--ac2);font-size:11.5px;margin-right:4px}
+footer{color:var(--mu);font-size:12px;padding:20px 16px;text-align:center}
+@media (max-width:640px){.hb{grid-template-columns:100px 1fr 56px}.hide-s{display:none}}
+</style>
+</head>
+<body>
+<header>
+  <h1>Órganos de contratación · licitaciones de obra</h1>
+  <p id="meta">Cargando datos…</p>
+</header>
+<main id="app"></main>
+<footer>Fuente: datos abiertos de la Plataforma de Contratación del Sector Público (sindicación 643 y 1044). Importes sin IVA. Baja = 1 − importe adjudicado / presupuesto base del lote.</footer>
+<script>
+const $=s=>document.querySelector(s);
+const eur=v=>v==null?'—':(Math.abs(v)>=1e6?(v/1e6).toLocaleString('es-ES',{maximumFractionDigits:2})+' M€':Math.round(v).toLocaleString('es-ES')+' €');
+const num=(v,d=1)=>v==null?'—':Number(v).toLocaleString('es-ES',{maximumFractionDigits:d});
+const pct=v=>v==null?'—':num(v,1)+' %';
+const esc=s=>(s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let IDX=null, F=[], orden={c:5,d:-1};
+const st={q:'',prov:'',tipo:''};
+try{Object.assign(st,JSON.parse(localStorage.getItem('placsp-filtros')||'{}'))}catch(e){}
+
+fetch('data/indice.json').then(r=>r.json()).then(d=>{
+  IDX=d; F=d.meta.campos;
+  $('#meta').textContent=`${d.meta.organos.toLocaleString('es-ES')} órganos · ${d.meta.expedientes.toLocaleString('es-ES')} expedientes de obra · actualizado ${new Date(d.meta.generado).toLocaleString('es-ES')}`;
+  route();
+}).catch(()=>{$('#meta').textContent='No hay datos todavía: ejecute el workflow «Actualizar datos PLACSP».'});
+addEventListener('hashchange',route);
+
+function route(){
+  const m=location.hash.match(/^#o=(.+)$/);
+  if(m) ficha(decodeURIComponent(m[1])); else lista();
+}
+
+function lista(){
+  const provs=[...new Set(IDX.organos.map(o=>o[2]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'es'));
+  const tipos=[...new Set(IDX.organos.map(o=>o[3]).filter(Boolean))].sort();
+  $('#app').innerHTML=`
+  <div class="fil">
+    <input type="search" id="q" placeholder="Buscar órgano, dependencia o NIF…" value="${esc(st.q)}">
+    <select id="prov"><option value="">Todas las provincias</option>${provs.map(p=>`<option ${p===st.prov?'selected':''}>${esc(p)}</option>`).join('')}</select>
+    <select id="tipo"><option value="">Todas las administraciones</option>${tipos.map(p=>`<option ${p===st.tipo?'selected':''}>${esc(p)}</option>`).join('')}</select>
+  </div>
+  <div class="wrap"><table><thead><tr>
+    <th data-c="1">Órgano</th><th data-c="2" class="hide-s">Provincia</th>
+    <th data-c="5" class="n">Expedientes</th><th data-c="6" class="n">Licitado</th>
+    <th data-c="7" class="n">Baja media</th><th data-c="8" class="n hide-s">Ofertas</th>
+    <th data-c="9" class="n hide-s">Juicio valor</th><th data-c="11" class="n hide-s">En plazo</th><th data-c="10" class="n hide-s">Últ. anuncio</th>
+  </tr></thead><tbody id="tb"></tbody></table></div><p class="mu sm" id="cnt"></p>`;
+  ['q','prov','tipo'].forEach(k=>$('#'+k).addEventListener('input',e=>{st[k]=e.target.value;guardar();pintar()}));
+  document.querySelectorAll('th[data-c]').forEach(th=>th.onclick=()=>{const c=+th.dataset.c;orden=orden.c===c?{c,d:-orden.d}:{c,d:c<=4?1:-1};pintar()});
+  pintar();
+}
+function guardar(){try{localStorage.setItem('placsp-filtros',JSON.stringify(st))}catch(e){}}
+function pintar(){
+  const q=st.q.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
+  let r=IDX.organos.filter(o=>(!st.prov||o[2]===st.prov)&&(!st.tipo||o[3]===st.tipo)&&(!q||(o[1]+' '+o[4]+' '+o[0]).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').includes(q)));
+  const {c,d}=orden;
+  r.sort((a,b)=>{const x=a[c],y=b[c];if(x==null)return 1;if(y==null)return -1;return (typeof x==='string'?x.localeCompare(y,'es'):x-y)*d});
+  $('#cnt').textContent=`${r.length.toLocaleString('es-ES')} órganos`+(r.length>500?' (se muestran 500)':'');
+  $('#tb').innerHTML=r.slice(0,500).map(o=>`<tr class="cl" onclick="location.hash='o='+encodeURIComponent('${o[0]}')">
+    <td><b>${esc(o[1])}</b><div class="mu sm">${esc(o[4])}</div></td><td class="hide-s">${esc(o[2])}</td>
+    <td class="n">${num(o[5],0)}</td><td class="n">${eur(o[6])}</td><td class="n">${pct(o[7])}</td>
+    <td class="n hide-s">${num(o[8])}</td><td class="n hide-s">${pct(o[9])}</td><td class="n hide-s">${o[11]||''}</td><td class="n hide-s">${esc(o[10])}</td></tr>`).join('');
+}
+
+function barras(obj,fmt=v=>num(v,0),key=null){
+  const ent=Object.entries(obj); if(!ent.length) return '<p class="mu sm">Sin datos</p>';
+  const val=e=>key?e[1][key]:e[1]; const mx=Math.max(...ent.map(val))||1;
+  return ent.map(e=>`<div class="hb"><span title="${esc(e[0])}" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(e[0])}</span><i style="width:${Math.max(2,100*val(e)/mx)}%"></i><span class="n" style="text-align:right">${fmt(val(e))}</span></div>`).join('');
+}
+
+function ficha(id){
+  $('#app').innerHTML='<p class="mu">Cargando ficha…</p>';
+  fetch('data/o/'+encodeURIComponent(id)+'.json').then(r=>{if(!r.ok)throw 0;return r.json()}).then(o=>{
+    const s=o.resumen;
+    const anios=Object.fromEntries(Object.entries(o.por_anio).slice(-8));
+    $('#app').innerHTML=`
+    <span class="back" onclick="location.hash=''">← Volver al listado</span>
+    <h2>${esc(o.nombre)}</h2>
+    <div class="mu">${esc(o.dependencia)}</div>
+    <div class="sm" style="margin-top:6px">
+      <span class="pill">${esc(o.tipo)}</span>${o.provincia?`<span class="pill">${esc(o.provincia)}</span>`:''}
+      ${o.nif?`NIF ${esc(o.nif)} · `:''}${o.dir3?`DIR3 ${esc(o.dir3)} · `:''}${esc(o.ciudad)}
+      ${o.perfil?` · <a href="${esc(o.perfil)}" target="_blank" rel="noopener">Perfil del contratante</a>`:''}
+      ${o.email?` · <a href="mailto:${esc(o.email)}">${esc(o.email)}</a>`:''}
+    </div>
+    <div class="kp">
+      <div class="k"><b>${num(s.expedientes,0)}</b><span>Expedientes de obra</span></div>
+      <div class="k"><b>${eur(s.pbl_total)}</b><span>Licitado (PBL sin IVA)</span></div>
+      <div class="k"><b>${eur(s.pbl_mediana)}</b><span>PBL mediano</span></div>
+      <div class="k"><b>${pct(s.baja_media)}</b><span>Baja media · mediana ${pct(s.baja_mediana)}</span></div>
+      <div class="k"><b>${pct(s.baja_p75)}</b><span>Baja percentil 75</span></div>
+      <div class="k"><b>${num(s.ofertas_media)}</b><span>Ofertas por lote (media)</span></div>
+      <div class="k"><b>${pct(s.juicio_valor_medio)}</b><span>Peso medio juicio de valor</span></div>
+      <div class="k"><b>${pct(s.pct_solo_automaticos)}</b><span>Expedientes solo con criterios automáticos</span></div>
+      <div class="k"><b>${pct(s.pct_desierto)}</b><span>Lotes desiertos</span></div>
+      <div class="k"><b>${num(s.dias_fin_ofertas_a_adjudicacion,0)} d</b><span>Fin de ofertas → adjudicación (mediana)</span></div>
+      <div class="k"><b>${pct(s.pct_pyme_adjudicataria)}</b><span>Adjudicaciones a pyme</span></div>
+      <div class="k"><b>${num(s.en_plazo,0)}</b><span>Licitaciones en plazo ahora</span></div>
+    </div>
+    <div class="g2">
+      <div class="card"><h3>Expedientes por año</h3>${barras(anios,v=>num(v,0),'n')}</div>
+      <div class="card"><h3>Importe licitado por año</h3>${barras(anios,eur,'pbl')}</div>
+      <div class="card"><h3>Procedimientos</h3>${barras(o.procedimientos)}</div>
+      <div class="card"><h3>Baja media por tramo de presupuesto</h3>${barras(o.bajas_por_tramo,pct,'media')}
+        <p class="mu sm">${Object.entries(o.bajas_por_tramo).map(([k,v])=>`${esc(k)}: ${v.n} lotes`).join(' · ')}</p></div>
+    </div>
+    <div class="card" style="margin:14px 0"><h3>Principales adjudicatarios</h3><div class="wrap"><table><thead><tr><th>Empresa</th><th class="hide-s">NIF</th><th class="n">Adjudicaciones</th><th class="n">Importe</th><th class="n">Baja media</th></tr></thead><tbody>
+      ${o.adjudicatarios.map(a=>`<tr><td>${esc(a.nombre)}</td><td class="hide-s mu">${esc(a.nif)}</td><td class="n">${a.n}</td><td class="n">${eur(a.importe)}</td><td class="n">${pct(a.baja_media)}</td></tr>`).join('')||'<tr><td colspan="5" class="mu">Sin adjudicaciones registradas</td></tr>'}
+    </tbody></table></div></div>
+    <div class="card"><h3>Expedientes (más recientes primero, máx. 400)</h3>
+      <div class="fil"><input type="search" id="qe" placeholder="Filtrar por objeto, adjudicatario o expediente…"></div>
+      <div class="wrap"><table><thead><tr><th>Anuncio</th><th>Expediente / objeto</th><th class="n">PBL</th><th class="hide-s">Proc.</th><th class="n hide-s">J. valor</th><th>Resultado</th></tr></thead><tbody id="te"></tbody></table></div></div>`;
+    const pe=f=>{
+      const q=f.toLowerCase();
+      $('#te').innerHTML=o.expedientes.filter(e=>!q||(e.exp+' '+e.objeto+' '+e.res.map(r=>r.adj).join(' ')).toLowerCase().includes(q)).map(e=>`<tr>
+        <td class="sm" style="white-space:nowrap">${esc(e.f_anuncio||'')}<div class="mu">${esc(e.estado)}</div></td>
+        <td><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.exp)}</a> ${e.pcap?`<a class="sm" href="${esc(e.pcap)}" target="_blank" rel="noopener">[PCAP]</a>`:''}<div>${esc(e.objeto)}</div><div class="mu sm">${esc(e.lugar)}${e.plazo?' · '+esc(e.plazo):''}${e.lotes>1?' · '+e.lotes+' lotes':''}</div></td>
+        <td class="n">${eur(e.pbl)}</td><td class="hide-s sm">${esc(e.proc)}</td><td class="n hide-s">${pct(e.jv)}</td>
+        <td class="sm">${e.res.map(r=>`${r.lote?'L'+esc(r.lote)+': ':''}${esc(r.adj||r.r)}${r.imp?` · ${eur(r.imp)}`:''}${r.baja!=null?` · <b>${pct(r.baja)}</b>`:''}${r.of!=null?` · ${num(r.of,0)} of.`:''}`).join('<br>')||'<span class="mu">—</span>'}</td></tr>`).join('');
+    };
+    $('#qe').oninput=e=>pe(e.target.value); pe('');
+    scrollTo(0,0);
+  }).catch(()=>{$('#app').innerHTML='<span class="back" onclick="location.hash=\'\'">← Volver</span><p>No se encontró la ficha.</p>'});
+}
+</script>
+</body>
+</html>
