@@ -92,6 +92,23 @@ PROVINCIA_CP = {
     "50": "Zaragoza", "51": "Ceuta", "52": "Melilla",
 }
 
+PROVINCIA_NUTS = {
+    "ES111": "A Coruña", "ES112": "Lugo", "ES113": "Ourense", "ES114": "Pontevedra", "ES120": "Asturias",
+    "ES130": "Cantabria", "ES211": "Álava", "ES212": "Gipuzkoa", "ES213": "Bizkaia", "ES220": "Navarra",
+    "ES230": "La Rioja", "ES241": "Huesca", "ES242": "Teruel", "ES243": "Zaragoza", "ES300": "Madrid",
+    "ES411": "Ávila", "ES412": "Burgos", "ES413": "León", "ES414": "Palencia", "ES415": "Salamanca",
+    "ES416": "Segovia", "ES417": "Soria", "ES418": "Valladolid", "ES419": "Zamora", "ES421": "Albacete",
+    "ES422": "Ciudad Real", "ES423": "Cuenca", "ES424": "Guadalajara", "ES425": "Toledo", "ES431": "Badajoz",
+    "ES432": "Cáceres", "ES511": "Barcelona", "ES512": "Girona", "ES513": "Lleida", "ES514": "Tarragona",
+    "ES521": "Alicante", "ES522": "Castellón", "ES523": "Valencia", "ES530": "Illes Balears",
+    "ES531": "Illes Balears", "ES532": "Illes Balears", "ES533": "Illes Balears", "ES611": "Almería",
+    "ES612": "Cádiz", "ES613": "Córdoba", "ES614": "Granada", "ES615": "Huelva", "ES616": "Jaén",
+    "ES617": "Málaga", "ES618": "Sevilla", "ES620": "Murcia", "ES630": "Ceuta", "ES640": "Melilla",
+    "ES703": "Santa Cruz de Tenerife", "ES704": "Las Palmas", "ES705": "Las Palmas",
+    "ES706": "Santa Cruz de Tenerife", "ES707": "Santa Cruz de Tenerife", "ES708": "Las Palmas",
+    "ES709": "Santa Cruz de Tenerife",
+}
+
 
 def log(*a):
     print(time.strftime("%H:%M:%S"), *a, flush=True)
@@ -230,7 +247,7 @@ def _organo(lcp):
         "org_provincia": PROVINCIA_CP.get(cp[:2], "") if len(cp) >= 2 else "",
         "org_web": _t(party, "WebsiteURI"),
         "org_email": _t(party, "Contact/ElectronicMail"),
-        "org_dependencia": " › ".join(reversed(dep)),
+        "org_dependencia": " › ".join(d for d in reversed(dep) if d.lower() != "sector público"),
         "org_perfil": _t(lcp, "BuyerProfileURIID"),
     }
 
@@ -411,6 +428,8 @@ def periodos_desde(txt: str, hoy: dt.date):
     actual = hoy.strftime("%Y%m")
     out = []
     for parte in [p.strip() for p in txt.split(",") if p.strip()]:
+        if parte in ("ninguno", "no"):
+            continue
         if parte == "auto":
             prev = (hoy.replace(day=1) - dt.timedelta(days=1))
             out += [prev.strftime("%Y%m"), actual]
@@ -539,8 +558,8 @@ def ficha_organo(rs: list[dict]) -> dict:
     plazos_adj = [d for d in plazos_adj if d is not None and 0 <= d <= 730]
     n_res = len([x for x in res if x["resultado"]])
     desiertos = len([x for x in res if x["resultado"] in RESULTADOS_DESIERTO])
-    bajas = [x["baja_pct"] for x in res_adj]
-    ofertas = [x["ofertas"] for x in res_adj]
+    bajas = [x["baja_pct"] for x in res_adj if x["baja_pct"] is not None]
+    ofertas = [x["ofertas"] for x in res_adj if x["ofertas"] is not None]
     jv = [r["pct_juicio_valor"] for r in lic if r["pct_juicio_valor"] is not None]
 
     def tramo(v):
@@ -554,11 +573,16 @@ def ficha_organo(rs: list[dict]) -> dict:
             if x["baja_pct"] is not None:
                 bajas_tramo[tramo(x["base_sin_iva"])].append(x["baja_pct"])
 
+    provincia = o["org_provincia"]
+    if not provincia:  # sin código postal (habitual en plataformas agregadas): provincia más frecuente de las obras
+        c = Counter(PROVINCIA_NUTS.get(r["nuts"]) for r in rs if PROVINCIA_NUTS.get(r["nuts"]))
+        provincia = c.most_common(1)[0][0] if c else ""
+    tipo = TIPO_ADMIN.get(o["org_tipo"]) or (f"Código {o['org_tipo']}" if o["org_tipo"] else "Sin clasificar")
     return {
         "id": o["org_id"], "nombre": o["org_nombre"], "nif": o["org_nif"], "dir3": o["org_dir3"],
-        "tipo": TIPO_ADMIN.get(o["org_tipo"], o["org_tipo"]), "ciudad": o["org_ciudad"],
-        "provincia": o["org_provincia"], "cp": o["org_cp"], "web": o["org_web"],
-        "email": o["org_email"], "dependencia": o["org_dependencia"], "perfil": o["org_perfil"],
+        "tipo": tipo, "ciudad": o["org_ciudad"],
+        "provincia": provincia, "cp": o["org_cp"], "web": o["org_web"],
+        "email": o["org_email"], "dependencia": re.sub(r"^Sector P[úu]blico › ", "", o["org_dependencia"], flags=re.I), "perfil": o["org_perfil"],
         "fuente": o["fuente"],
         "resumen": {
             "expedientes": len(lic),
@@ -678,7 +702,7 @@ def main():
     d = sub.add_parser("descargar")
     d.add_argument("--periodos", default="auto")
     d.add_argument("--fuentes", default="placsp,agregadas")
-    d.add_argument("--hilos", type=int, default=6, help="Descargas simultáneas")
+    d.add_argument("--hilos", type=int, default=10, help="Descargas simultáneas")
     d.add_argument("--forzar", action="store_true", help="Repetir periodos ya descargados")
     d.set_defaults(func=cmd_descargar)
     c = sub.add_parser("construir")

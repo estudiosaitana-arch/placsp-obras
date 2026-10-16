@@ -30,8 +30,9 @@ Carga histórica (una ejecución por año, desde *Actions → Actualizar datos P
 | `auto` | mes anterior + mes en curso |
 | `2025` | los 12 ficheros mensuales de 2025 |
 | `202401-202406` | rango de meses |
+| `ninguno` | no descarga; solo regenera las fichas |
 
-Los meses ya descargados se omiten, así que si una carga se corta por tiempo basta con relanzarla con el mismo periodo. La PLACSP sirve los ficheros a unos 0,2 MB/s por conexión; el script descarga 6 meses en paralelo.
+Los meses ya descargados se omiten, así que si una carga se corta por tiempo basta con relanzarla con el mismo periodo. La PLACSP sirve los ficheros a unos 0,2 MB/s por conexión; el script descarga 10 ficheros en paralelo.
 
 En local (Python 3.10+, sin dependencias):
 
