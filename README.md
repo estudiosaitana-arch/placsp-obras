@@ -7,11 +7,11 @@ Fichas de **órganos de contratación** a partir de las **licitaciones de obra**
 1. **Descarga** los ficheros de sindicación de la PLACSP:
    - `sindicacion_643`: licitaciones publicadas en la PLACSP (sin contratos menores).
    - `sindicacion_1044`: plataformas autonómicas agregadas (sin contratos menores).
-2. **Filtra** los expedientes con tipo de contrato *Obras* (`TypeCode = 3`) y guarda una versión compacta en `data/raw/` (un fichero por fuente y periodo).
+2. **Filtra** los expedientes con tipo de contrato *Obras* (`TypeCode = 3`) y guarda una versión compacta por fuente y mes. Estos ficheros intermedios no se versionan en git: se guardan como adjuntos de la release [`datos`](../../releases/tag/datos).
 3. **Consolida** (se queda con la última versión de cada expediente y descarta los eliminados) y **genera**:
-   - `docs/data/indice.json` y `docs/data/o/<órgano>.json`: fichas por órgano.
-   - `data/expedientes_obra.csv.gz`, `data/adjudicaciones_obra.csv.gz`, `data/organos_obra.csv`: tablas para Excel (separador `;`, UTF-8).
-4. **Publica** el visor `docs/index.html` (GitHub Pages).
+   - Fichas por órgano (`indice.json` y `o/<órgano>.json`), publicadas junto al visor.
+   - `expedientes_obra.csv.gz`, `adjudicaciones_obra.csv.gz`, `organos_obra.csv`: tablas para Excel (separador `;`, UTF-8), descargables desde la release [`datos`](../../releases/tag/datos).
+4. **Publica** el visor `docs/index.html` en GitHub Pages directamente desde el workflow (no se hace commit de los datos).
 
 ## Indicadores de cada ficha
 
