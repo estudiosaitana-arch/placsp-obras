@@ -55,7 +55,7 @@ const num=(v,d=1)=>v==null?'—':Number(v).toLocaleString('es-ES',{maximumFracti
 const pct=v=>v==null?'—':num(v,1)+' %';
 const esc=s=>(s??'').toString().replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 let IDX=null, F=[], orden={c:5,d:-1};
-const st={q:'',prov:'',tipo:''};
+const st={q:'',prov:'',tipo:'',jv:''};
 try{Object.assign(st,JSON.parse(localStorage.getItem('placsp-filtros')||'{}'))}catch(e){}
 
 fetch('data/indice.json').then(r=>r.json()).then(d=>{
@@ -78,28 +78,29 @@ function lista(){
     <input type="search" id="q" placeholder="Buscar órgano, dependencia o NIF…" value="${esc(st.q)}">
     <select id="prov"><option value="">Todas las provincias</option>${provs.map(p=>`<option ${p===st.prov?'selected':''}>${esc(p)}</option>`).join('')}</select>
     <select id="tipo"><option value="">Todas las administraciones</option>${tipos.map(p=>`<option ${p===st.tipo?'selected':''}>${esc(p)}</option>`).join('')}</select>
+    <select id="jv"><option value="">Con y sin juicio de valor</option><option value="con" ${st.jv==='con'?'selected':''}>Usa juicio de valor</option><option value="sin" ${st.jv==='sin'?'selected':''}>Solo criterios automáticos</option><option value="sd" ${st.jv==='sd'?'selected':''}>Sin datos de criterios</option></select>
   </div>
   <div class="wrap"><table><thead><tr>
     <th data-c="1">Órgano</th><th data-c="2" class="hide-s">Provincia</th>
     <th data-c="5" class="n">Expedientes</th><th data-c="6" class="n">Licitado</th>
     <th data-c="7" class="n">Baja media</th><th data-c="8" class="n hide-s">Ofertas</th>
-    <th data-c="9" class="n hide-s">Juicio valor</th><th data-c="11" class="n hide-s">En plazo</th><th data-c="10" class="n hide-s">Últ. anuncio</th>
+    <th data-c="12" class="n hide-s" title="Expedientes con criterios sujetos a juicio de valor sobre los que publican criterios">% con JV</th><th data-c="13" class="n hide-s">Baja con JV</th><th data-c="14" class="n hide-s">Baja solo autom.</th><th data-c="11" class="n hide-s">En plazo</th><th data-c="10" class="n hide-s">Últ. anuncio</th>
   </tr></thead><tbody id="tb"></tbody></table></div><p class="mu sm" id="cnt"></p>`;
-  ['q','prov','tipo'].forEach(k=>$('#'+k).addEventListener('input',e=>{st[k]=e.target.value;guardar();pintar()}));
+  ['q','prov','tipo','jv'].forEach(k=>$('#'+k).addEventListener('input',e=>{st[k]=e.target.value;guardar();pintar()}));
   document.querySelectorAll('th[data-c]').forEach(th=>th.onclick=()=>{const c=+th.dataset.c;orden=orden.c===c?{c,d:-orden.d}:{c,d:c<=4?1:-1};pintar()});
   pintar();
 }
 function guardar(){try{localStorage.setItem('placsp-filtros',JSON.stringify(st))}catch(e){}}
 function pintar(){
   const q=st.q.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'');
-  let r=IDX.organos.filter(o=>(!st.prov||o[2]===st.prov)&&(!st.tipo||o[3]===st.tipo)&&(!q||(o[1]+' '+o[4]+' '+o[0]).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').includes(q)));
+  let r=IDX.organos.filter(o=>(!st.prov||o[2]===st.prov)&&(!st.tipo||o[3]===st.tipo)&&(!st.jv||(st.jv==='con'?o[12]>0:st.jv==='sin'?o[12]===0:o[12]==null))&&(!q||(o[1]+' '+o[4]+' '+o[0]).toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu,'').includes(q)));
   const {c,d}=orden;
   r.sort((a,b)=>{const x=a[c],y=b[c];if(x==null)return 1;if(y==null)return -1;return (typeof x==='string'?x.localeCompare(y,'es'):x-y)*d});
   $('#cnt').textContent=`${r.length.toLocaleString('es-ES')} órganos`+(r.length>500?' (se muestran 500)':'');
   $('#tb').innerHTML=r.slice(0,500).map(o=>`<tr class="cl" onclick="location.hash='o='+encodeURIComponent('${o[0]}')">
     <td><b>${esc(o[1])}</b><div class="mu sm">${esc(o[4])}</div></td><td class="hide-s">${esc(o[2])}</td>
     <td class="n">${num(o[5],0)}</td><td class="n">${eur(o[6])}</td><td class="n">${pct(o[7])}</td>
-    <td class="n hide-s">${num(o[8])}</td><td class="n hide-s">${pct(o[9])}</td><td class="n hide-s">${o[11]||''}</td><td class="n hide-s">${esc(o[10])}</td></tr>`).join('');
+    <td class="n hide-s">${num(o[8])}</td><td class="n hide-s">${pct(o[12])}</td><td class="n hide-s">${pct(o[13])}</td><td class="n hide-s">${pct(o[14])}</td><td class="n hide-s">${o[11]||''}</td><td class="n hide-s">${esc(o[10])}</td></tr>`).join('');
 }
 
 function barras(obj,fmt=v=>num(v,0),key=null){
@@ -131,12 +132,17 @@ function ficha(id){
       <div class="k"><b>${pct(s.baja_p75)}</b><span>Baja percentil 75</span></div>
       <div class="k"><b>${num(s.ofertas_media)}</b><span>Ofertas por lote (media)</span></div>
       <div class="k"><b>${pct(s.juicio_valor_medio)}</b><span>Peso medio juicio de valor</span></div>
-      <div class="k"><b>${pct(s.pct_solo_automaticos)}</b><span>Expedientes solo con criterios automáticos</span></div>
+      <div class="k"><b>${pct(s.pct_con_jv)}</b><span>Expedientes con juicio de valor (${num(s.exp_con_jv,0)} de ${num((s.exp_con_jv||0)+(s.exp_solo_auto||0),0)} con criterios publicados)</span></div>
       <div class="k"><b>${pct(s.pct_desierto)}</b><span>Lotes desiertos</span></div>
       <div class="k"><b>${num(s.dias_fin_ofertas_a_adjudicacion,0)} d</b><span>Fin de ofertas → adjudicación (mediana)</span></div>
       <div class="k"><b>${pct(s.pct_pyme_adjudicataria)}</b><span>Adjudicaciones a pyme</span></div>
       <div class="k"><b>${num(s.en_plazo,0)}</b><span>Licitaciones en plazo ahora</span></div>
     </div>
+    <div class="card" style="margin:14px 0"><h3>Con juicio de valor / solo criterios automáticos</h3>
+      <div class="wrap"><table><thead><tr><th>Tipo de licitación</th><th class="n">Expedientes</th><th class="n hide-s">PBL mediano</th><th class="n">Lotes con baja</th><th class="n">Baja media</th><th class="n hide-s">Baja mediana</th><th class="n hide-s">Baja P75</th><th class="n">Ofertas/lote</th><th class="n hide-s">% desiertos</th><th class="n hide-s">Peso precio</th><th class="n hide-s">Peso JV</th></tr></thead><tbody>
+      ${Object.entries(o.por_juicio_valor||{}).concat(Object.entries(o.jv_por_peso||{}).map(([k,v])=>['\u00a0\u00a0\u21b3 '+k,v])).map(([k,g])=>`<tr><td>${esc(k)}</td><td class="n">${num(g.n,0)}</td><td class="n hide-s">${eur(g.pbl_mediana)}</td><td class="n">${num(g.lotes_con_baja,0)}</td><td class="n"><b>${pct(g.baja_media)}</b></td><td class="n hide-s">${pct(g.baja_mediana)}</td><td class="n hide-s">${pct(g.baja_p75)}</td><td class="n">${num(g.ofertas_media)}</td><td class="n hide-s">${pct(g.pct_desierto)}</td><td class="n hide-s">${pct(g.peso_precio_medio)}</td><td class="n hide-s">${pct(g.peso_jv_medio)}</td></tr>`).join('')}
+      </tbody></table></div>
+      <p class="mu sm">Clasificación por el tipo de cada criterio publicado (OBJ = fórmula, SUBJ = juicio de valor). «Sin datos»: el expediente no publica criterios (habitual en plataformas autonómicas agregadas). Las filas ↳ desglosan los expedientes con juicio de valor según su peso sobre el total de puntos.</p></div>
     <div class="g2">
       <div class="card"><h3>Expedientes por año</h3>${barras(anios,v=>num(v,0),'n')}</div>
       <div class="card"><h3>Importe licitado por año</h3>${barras(anios,eur,'pbl')}</div>
@@ -148,17 +154,17 @@ function ficha(id){
       ${o.adjudicatarios.map(a=>`<tr><td>${esc(a.nombre)}</td><td class="hide-s mu">${esc(a.nif)}</td><td class="n">${a.n}</td><td class="n">${eur(a.importe)}</td><td class="n">${pct(a.baja_media)}</td></tr>`).join('')||'<tr><td colspan="5" class="mu">Sin adjudicaciones registradas</td></tr>'}
     </tbody></table></div></div>
     <div class="card"><h3>Expedientes (más recientes primero, máx. 400)</h3>
-      <div class="fil"><input type="search" id="qe" placeholder="Filtrar por objeto, adjudicatario o expediente…"></div>
+      <div class="fil"><input type="search" id="qe" placeholder="Filtrar por objeto, adjudicatario o expediente…"><select id="cj"><option value="">Todos</option><option value="jv">Con juicio de valor</option><option value="auto">Solo criterios automáticos</option><option value="sd">Sin datos de criterios</option></select></div>
       <div class="wrap"><table><thead><tr><th>Anuncio</th><th>Expediente / objeto</th><th class="n">PBL</th><th class="hide-s">Proc.</th><th class="n hide-s">J. valor</th><th>Resultado</th></tr></thead><tbody id="te"></tbody></table></div></div>`;
-    const pe=f=>{
-      const q=f.toLowerCase();
-      $('#te').innerHTML=o.expedientes.filter(e=>!q||(e.exp+' '+e.objeto+' '+e.res.map(r=>r.adj).join(' ')).toLowerCase().includes(q)).map(e=>`<tr>
+    const pe=()=>{
+      const q=$('#qe').value.toLowerCase(), cj=$('#cj').value;
+      $('#te').innerHTML=o.expedientes.filter(e=>!cj||e.cjv===cj).filter(e=>!q||(e.exp+' '+e.objeto+' '+e.res.map(r=>r.adj).join(' ')).toLowerCase().includes(q)).map(e=>`<tr>
         <td class="sm" style="white-space:nowrap">${esc(e.f_anuncio||'')}<div class="mu">${esc(e.estado)}</div></td>
         <td><a href="${esc(e.url)}" target="_blank" rel="noopener">${esc(e.exp)}</a> ${e.pcap?`<a class="sm" href="${esc(e.pcap)}" target="_blank" rel="noopener">[PCAP]</a>`:''}<div>${esc(e.objeto)}</div><div class="mu sm">${esc(e.lugar)}${e.plazo?' · '+esc(e.plazo):''}${e.lotes>1?' · '+e.lotes+' lotes':''}</div></td>
-        <td class="n">${eur(e.pbl)}</td><td class="hide-s sm">${esc(e.proc)}</td><td class="n hide-s">${pct(e.jv)}</td>
+        <td class="n">${eur(e.pbl)}</td><td class="hide-s sm">${esc(e.proc)}</td><td class="n hide-s">${e.cjv==='sd'?'<span class="mu">s/d</span>':pct(e.jv)}${e.precio!=null?`<div class="mu sm">precio ${pct(e.precio)}</div>`:''}</td>
         <td class="sm">${e.res.map(r=>`${r.lote?'L'+esc(r.lote)+': ':''}${esc(r.adj||r.r)}${r.imp?` · ${eur(r.imp)}`:''}${r.baja!=null?` · <b>${pct(r.baja)}</b>`:''}${r.of!=null?` · ${num(r.of,0)} of.`:''}`).join('<br>')||'<span class="mu">—</span>'}</td></tr>`).join('');
     };
-    $('#qe').oninput=e=>pe(e.target.value); pe('');
+    $('#qe').oninput=pe; $('#cj').onchange=pe; pe();
     scrollTo(0,0);
   }).catch(()=>{$('#app').innerHTML='<span class="back" onclick="location.hash=\'\'">← Volver</span><p>No se encontró la ficha.</p>'});
 }
