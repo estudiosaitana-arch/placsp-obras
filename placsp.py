@@ -524,6 +524,48 @@ def _dias(a, b):
         return None
 
 
+CLASES_JV = {"jv": "Con juicio de valor", "auto": "Solo criterios automáticos", "sd": "Sin datos de criterios"}
+
+
+def clase_jv(r) -> str:
+    """Clasifica el expediente por sus criterios de adjudicación (AwardingCriteriaTypeCode)."""
+    crit = r.get("criterios") or []
+    if not crit:
+        return "sd"
+    if any(c["tipo"] == "SUBJ" and (c["peso"] is None or c["peso"] > 0) for c in crit):
+        return "jv"
+    return "auto"
+
+
+def tramo_jv(p):
+    if p is None:
+        return None
+    return "JV ≤ 25 %" if p <= 25 else "JV 25–49 %" if p < 50 else "JV ≥ 50 %"
+
+
+def _stats_grupo(rs_g, ids_adj):
+    """Indicadores de un subconjunto de expedientes (no anulados)."""
+    res = [x for r in rs_g for x in r["resultados"]]
+    adj = [x for x in res if id(x) in ids_adj]
+    bajas = [x["baja_pct"] for x in adj if x["baja_pct"] is not None]
+    ofertas = [x["ofertas"] for x in adj if x["ofertas"] is not None]
+    n_res = len([x for x in res if x["resultado"]])
+    des = len([x for x in res if x["resultado"] in RESULTADOS_DESIERTO])
+    return {
+        "n": len(rs_g),
+        "pbl_total": round(sum(r["pbl_sin_iva"] or 0 for r in rs_g), 2),
+        "pbl_mediana": _med([r["pbl_sin_iva"] for r in rs_g]),
+        "lotes_adj": len(adj),
+        "lotes_con_baja": len(bajas),
+        "baja_media": _media(bajas), "baja_mediana": _med(bajas),
+        "baja_p75": (round(statistics.quantiles(bajas, n=4)[2], 2) if len(bajas) >= 4 else None),
+        "ofertas_media": _media(ofertas),
+        "pct_desierto": round(100 * des / n_res, 1) if n_res else None,
+        "peso_jv_medio": _media([r["pct_juicio_valor"] for r in rs_g if r["pct_juicio_valor"] is not None]),
+        "peso_precio_medio": _media([r["pct_precio"] for r in rs_g if r.get("pct_precio") is not None]),
+    }
+
+
 def ficha_organo(rs: list[dict]) -> dict:
     rs = sorted(rs, key=lambda r: (r.get("f_anuncio") or r.get("updated") or ""), reverse=True)
     o = rs[0]
@@ -578,6 +620,13 @@ def ficha_organo(rs: list[dict]) -> dict:
         c = Counter(PROVINCIA_NUTS.get(r["nuts"]) for r in rs if PROVINCIA_NUTS.get(r["nuts"]))
         provincia = c.most_common(1)[0][0] if c else ""
     tipo = TIPO_ADMIN.get(o["org_tipo"]) or (f"Código {o['org_tipo']}" if o["org_tipo"] else "Sin clasificar")
+    por_jv = {k: _stats_grupo([r for r in lic if clase_jv(r) == k], ids_adj) for k in CLASES_JV}
+    tramos_jv = {}
+    for t in ("JV ≤ 25 %", "JV 25–49 %", "JV ≥ 50 %"):
+        g = [r for r in lic if clase_jv(r) == "jv" and tramo_jv(r["pct_juicio_valor"]) == t]
+        if g:
+            tramos_jv[t] = _stats_grupo(g, ids_adj)
+    clasif = por_jv["jv"]["n"] + por_jv["auto"]["n"]
     return {
         "id": o["org_id"], "nombre": o["org_nombre"], "nif": o["org_nif"], "dir3": o["org_dir3"],
         "tipo": tipo, "ciudad": o["org_ciudad"],
@@ -598,6 +647,8 @@ def ficha_organo(rs: list[dict]) -> dict:
             "pct_desierto": round(100 * desiertos / n_res, 1) if n_res else None,
             "juicio_valor_medio": _media(jv),
             "pct_solo_automaticos": round(100 * len([v for v in jv if v == 0]) / len(jv), 1) if jv else None,
+            "pct_con_jv": round(100 * por_jv["jv"]["n"] / clasif, 1) if clasif else None,
+            "exp_con_jv": por_jv["jv"]["n"], "exp_solo_auto": por_jv["auto"]["n"], "exp_sin_criterios": por_jv["sd"]["n"],
             "dias_fin_ofertas_a_adjudicacion": _med(plazos_adj),
             "pct_pyme_adjudicataria": (round(100 * len([x for x in res_adj if x["pyme"] == "true"]) / len(res_adj), 1)
                                         if res_adj else None),
@@ -605,6 +656,8 @@ def ficha_organo(rs: list[dict]) -> dict:
         },
         "por_anio": {k: {"n": v["n"], "pbl": round(v["pbl"], 2), "adj": round(v["adj"], 2)}
                      for k, v in sorted(por_anio.items()) if k},
+        "por_juicio_valor": {CLASES_JV[k]: v for k, v in por_jv.items()},
+        "jv_por_peso": tramos_jv,
         "procedimientos": dict(Counter(PROCEDIMIENTO.get(r["procedimiento"], r["procedimiento"] or "—") for r in lic).most_common()),
         "bajas_por_tramo": {k: {"n": len(v), "media": _media(v), "mediana": _med(v)}
                             for k, v in bajas_tramo.items() if k},
@@ -620,7 +673,7 @@ def ficha_organo(rs: list[dict]) -> dict:
                 "proc": PROCEDIMIENTO.get(r["procedimiento"], r["procedimiento"]),
                 "f_anuncio": r["f_anuncio"], "fin_ofertas": r["fin_ofertas"],
                 "pbl": r["pbl_sin_iva"], "ve": r["valor_estimado"], "lotes": r["n_lotes"],
-                "jv": r["pct_juicio_valor"], "plazo": (r["plazo_ejecucion"] + " " + UNIDAD.get(r["plazo_unidad"], r["plazo_unidad"])).strip() if r["plazo_ejecucion"] else "",
+                "jv": r["pct_juicio_valor"], "cjv": clase_jv(r), "precio": r.get("pct_precio"), "plazo": (r["plazo_ejecucion"] + " " + UNIDAD.get(r["plazo_unidad"], r["plazo_unidad"])).strip() if r["plazo_ejecucion"] else "",
                 "lugar": r["lugar"], "url": r["url"], "pcap": r["pcap"],
                 "res": [
                     {"lote": x["lote"], "r": RESULTADO.get(x["resultado"], x["resultado"]),
@@ -645,11 +698,12 @@ def cmd_construir(args):
     SALIDA_DATA.mkdir(parents=True, exist_ok=True)
     cols = ["expediente", "org_id", "org_nombre", "org_provincia", "org_tipo", "estado", "objeto",
             "procedimiento", "f_anuncio", "fin_ofertas", "valor_estimado", "pbl_sin_iva", "n_lotes",
-            "pct_juicio_valor", "pct_precio", "nuts", "lugar", "url", "pcap", "updated", "fuente"]
+            "clase_jv", "pct_juicio_valor", "pct_precio", "nuts", "lugar", "url", "pcap", "updated", "fuente"]
     with gzip.open(SALIDA_DATA / "expedientes_obra.csv.gz", "wt", encoding="utf-8-sig", newline="") as f:
         w = csv.writer(f, delimiter=";")
         w.writerow(cols)
         for r in regs:
+            r["clase_jv"] = CLASES_JV[clase_jv(r)]
             w.writerow([r.get(c, "") if not isinstance(r.get(c), float) else str(r[c]).replace(".", ",") for c in cols])
     rcols = ["lote", "resultado", "f_adjudicacion", "ofertas", "ofertas_pyme", "adjudicatario",
              "adjudicatario_nif", "pyme", "base_sin_iva", "importe_adj_sin_iva", "baja_pct"]
@@ -677,14 +731,17 @@ def cmd_construir(args):
         s = fi["resumen"]
         indice.append([oid, fi["nombre"], fi["provincia"], fi["tipo"], fi["dependencia"][:120],
                        s["expedientes"], round(s["pbl_total"]), s["baja_media"], s["ofertas_media"],
-                       s["juicio_valor_medio"], s["ultima_publicacion"], s["en_plazo"]])
+                       s["juicio_valor_medio"], s["ultima_publicacion"], s["en_plazo"],
+                       s["pct_con_jv"], fi["por_juicio_valor"]["Con juicio de valor"]["baja_media"],
+                       fi["por_juicio_valor"]["Solo criterios automáticos"]["baja_media"]])
     indice.sort(key=lambda x: -x[5])
     meta = {
         "generado": dt.datetime.now(dt.timezone.utc).isoformat(timespec="minutes"),
         "expedientes": len(regs), "organos": len(indice),
         "periodos": sorted(p.name.replace(".jsonl.gz", "") for p in RAW.glob("*.jsonl.gz")),
         "campos": ["id", "nombre", "provincia", "tipo", "dependencia", "expedientes", "pbl_total",
-                   "baja_media", "ofertas_media", "juicio_valor_medio", "ultima_publicacion", "en_plazo"],
+                   "baja_media", "ofertas_media", "juicio_valor_medio", "ultima_publicacion", "en_plazo",
+                   "pct_con_jv", "baja_media_con_jv", "baja_media_solo_auto"],
     }
     (SALIDA_WEB / "indice.json").write_text(
         json.dumps({"meta": meta, "organos": indice}, ensure_ascii=False, separators=(",", ":")), "utf-8")

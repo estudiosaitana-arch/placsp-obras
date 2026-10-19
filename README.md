@@ -15,7 +15,9 @@ Fichas de **órganos de contratación** a partir de las **licitaciones de obra**
 
 ## Indicadores de cada ficha
 
-Expedientes e importe licitado (total y por año), PBL mediano, baja media / mediana / percentil 75 (global y por tramo de presupuesto), ofertas por lote, peso medio de los criterios sujetos a juicio de valor, % de expedientes solo con criterios automáticos, % de lotes desiertos, días entre fin de ofertas y adjudicación, % adjudicado a pyme, procedimientos, principales adjudicatarios y listado de expedientes con enlace a la PLACSP y al PCAP.
+Distinción **con juicio de valor / solo criterios automáticos / sin datos de criterios**, según el tipo de cada criterio de adjudicación publicado (`cbc:AwardingCriteriaTypeCode`: OBJ = fórmula, SUBJ = juicio de valor), con baja, ofertas, % de desiertos y peso del precio por grupo y desglose por peso del juicio de valor (≤ 25 %, 25–49 %, ≥ 50 %).
+
+Además: expedientes e importe licitado (total y por año), PBL mediano, baja media / mediana / percentil 75 (global y por tramo de presupuesto), ofertas por lote, peso medio de los criterios sujetos a juicio de valor, % de expedientes solo con criterios automáticos, % de lotes desiertos, días entre fin de ofertas y adjudicación, % adjudicado a pyme, procedimientos, principales adjudicatarios y listado de expedientes con enlace a la PLACSP y al PCAP.
 
 **Baja** = 1 − importe de adjudicación sin IVA / presupuesto base de licitación sin IVA del lote. Se descartan valores fuera de 0–90 %.
 
