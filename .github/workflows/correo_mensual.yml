@@ -1,0 +1,104 @@
+name: Correo mensual de órganos
+
+on:
+  schedule:
+    - cron: "37 5 1 * *"   # día 1 de cada mes, 05:37 UTC (06:37/07:37 en Madrid)
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: actualizar-datos
+  cancel-in-progress: false
+
+env:
+  RELEASE: datos
+  GH_TOKEN: ${{ github.token }}
+
+jobs:
+  correo:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Recuperar datos brutos de la release
+        run: |
+          mkdir -p data/raw
+          gh release download "$RELEASE" -p "*.jsonl.gz" -D data/raw --clobber
+          ls data/raw | wc -l
+          touch "$RUNNER_TEMP/marca"
+
+      - name: Actualizar el mes anterior y el mes en curso
+        timeout-minutes: 180
+        continue-on-error: true
+        run: python placsp.py descargar --periodos auto
+
+      - name: Subir a la release los datos actualizados
+        if: always()
+        run: |
+          for f in data/raw/*.jsonl.gz; do
+            [ "$f" -nt "$RUNNER_TEMP/marca" ] && gh release upload "$RELEASE" "$f" --clobber || true
+          done
+
+      - name: Construir fichas y Excel
+        run: |
+          pip install --quiet openpyxl
+          python placsp.py construir
+          python excel_organos.py data/organos_contratacion_obras_PLACSP.xlsx
+          gh release upload "$RELEASE" data/organos_contratacion_obras_PLACSP.xlsx --clobber
+
+      - name: Preparar el correo
+        id: correo
+        env:
+          USUARIO: ${{ secrets.GMAIL_USUARIO }}
+          CLAVE: ${{ secrets.GMAIL_CONTRASENA_APP }}
+          DESTINO: ${{ secrets.CORREO_DESTINO }}
+        run: |
+          python - <<'EOF'
+          import json, datetime as dt
+          m = json.load(open("docs/data/indice.json", encoding="utf-8"))["meta"]
+          fmt = lambda n: f"{n:,}".replace(",", ".")
+          hoy = dt.date.today()
+          texto = (
+              "Se acompaña el listado mensual de órganos de contratación con licitaciones de obra "
+              "(datos abiertos de la PLACSP y plataformas autonómicas agregadas).\n\n"
+              f"Órganos: {fmt(m['organos'])}\n"
+              f"Expedientes de obra: {fmt(m['expedientes'])}\n"
+              f"Datos actualizados a: {m['generado'][:10]}\n\n"
+              "El Excel incluye, por órgano: expedientes por año, importe licitado y adjudicado, baja media, "
+              "mediana y P75, ofertas por lote, % de lotes desiertos, distinción con juicio de valor / solo "
+              "criterios automáticos (con baja, ofertas y desiertos de cada grupo), procedimientos, principales "
+              "adjudicatarios y enlaces al perfil del contratante y a la ficha web. La hoja Leyenda define cada indicador.\n\n"
+              "Visor web: https://estudiosaitana-arch.github.io/placsp-obras/\n"
+          )
+          open("correo.txt", "w", encoding="utf-8").write(texto)
+          with open(__import__("os").environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"mes={hoy.strftime('%m/%Y')}\n")
+          EOF
+          if [ -z "$USUARIO" ] || [ -z "$CLAVE" ] || [ -z "$DESTINO" ]; then
+            echo "::warning::No se envía correo: faltan los secretos GMAIL_USUARIO, GMAIL_CONTRASENA_APP o CORREO_DESTINO en este repositorio."
+            echo "enviar=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "enviar=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Enviar el Excel por correo
+        if: steps.correo.outputs.enviar == 'true'
+        uses: dawidd6/action-send-mail@v3
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.GMAIL_USUARIO }}
+          password: ${{ secrets.GMAIL_CONTRASENA_APP }}
+          from: Órganos de contratación · obras <${{ secrets.GMAIL_USUARIO }}>
+          to: ${{ secrets.CORREO_DESTINO }}
+          subject: "Órganos de contratación · licitaciones de obra · ${{ steps.correo.outputs.mes }}"
+          body: file://correo.txt
+          attachments: data/organos_contratacion_obras_PLACSP.xlsx
