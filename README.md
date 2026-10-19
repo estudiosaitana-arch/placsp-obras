@@ -43,6 +43,12 @@ python placsp.py descargar --periodos 2025
 python placsp.py construir
 ```
 
+## Correo mensual
+
+El workflow **Correo mensual de órganos** se ejecuta el día 1 de cada mes: actualiza el mes anterior y el mes en curso, regenera las fichas y el Excel de órganos (`excel_organos.py`) y lo envía por correo desde Gmail. El Excel también queda en la release [`datos`](../../releases/tag/datos).
+
+Necesita tres secretos en *Settings → Secrets and variables → Actions*: `GMAIL_USUARIO` (cuenta Gmail remitente), `GMAIL_CONTRASENA_APP` (contraseña de aplicación de esa cuenta) y `CORREO_DESTINO`. Sin ellos el workflow genera el Excel pero no envía el correo.
+
 ## Limitaciones conocidas
 
 - Los datos son los que publica cada órgano: hay expedientes sin importe de adjudicación, sin número de ofertas o con criterios sin ponderar.
